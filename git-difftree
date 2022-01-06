@@ -1,0 +1,5 @@
+#!/bin/sh
+
+# A simple wrapper around git-difftool.
+
+exec git difftool --dir-diff --extcmd=difftree "$@"
