@@ -128,7 +128,9 @@ static void on_row_activated(GtkTreeView *view, GtkTreePath *path, GtkTreeViewCo
     else if (type == G_FILE_TYPE_REGULAR || type == G_FILE_TYPE_SYMBOLIC_LINK)
     {
         // TODO: Skip this if we know the files to be identical?
-        if (!dt_diff_process_manager_start_diff(win->child_manager, &iter, &error))
+        if (!dt_diff_process_manager_start_diff(win->child_manager,
+                    win->config->diff_command_line, win->config->keep_temp_files,
+                    &iter, &error))
         {
             show_error_message(win->window, "Failed to start diff tool: %s\n", get_gerror_message(error));
             g_clear_error(&error);
@@ -463,8 +465,7 @@ static void on_source_scan_ready(GObject *sourceobj, GAsyncResult *res, gpointer
     }
 }
 
-WindowData *create_main_window(DiffTreeConfig *config, GPtrArray *sources,
-        const char *diff_command)
+WindowData *create_main_window(DiffTreeConfig *config, GPtrArray *sources)
 {
     WindowData *win = g_malloc0(sizeof(WindowData));
     gint i;
@@ -481,15 +482,7 @@ WindowData *create_main_window(DiffTreeConfig *config, GPtrArray *sources,
     g_array_set_size(win->hide_missing_flags, dt_diff_tree_model_get_num_sources(win->diff_model));
 
     init_gui(win);
-
-    if (diff_command != NULL)
-    {
-        win->child_manager = dt_diff_process_manager_new(win->diff_model, diff_command, config->keep_temp_files);
-    }
-    else
-    {
-        win->child_manager = dt_diff_process_manager_new(win->diff_model, config->diff_command_line, config->keep_temp_files);
-    }
+    win->child_manager = dt_diff_process_manager_new(win->diff_model);
 
     // Start reading the sources
     for (i=0; i<dt_diff_tree_model_get_num_sources(win->diff_model); i++)
@@ -588,7 +581,12 @@ int main(int argc, char **argv)
     {
         config_data_read_file(config, config_file);
     }
-    win = create_main_window(config, sources, option_diff_command);
+    if (option_diff_command != NULL)
+    {
+        g_free(config->diff_command_line);
+        config->diff_command_line = option_diff_command;
+    }
+    win = create_main_window(config, sources);
 
     gtk_main();
 
@@ -601,7 +599,6 @@ int main(int argc, char **argv)
 done:
     g_strfreev(paths);
     g_free(config_file);
-    g_free(option_diff_command);
     diff_tree_config_unref(config);
     cleanup_main_window(win);
 

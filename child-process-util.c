@@ -4,18 +4,9 @@
 
 struct _DtDiffProcessManager
 {
-    gint diff_command_argc;
-    char **diff_command_argv;
     DtDiffTreeModel *model;
     GTree *processes;
 
-    /**
-     * If true, then keep the temp files after a child process terminates,
-     * and instead delete them all when the DtDiffProcessManager is destroyed.
-     *
-     * This would be important if we're using a diff tool that uses a single
-     * process to handle multiple invocations.
-     */
     gboolean keep_process_files;
 };
 
@@ -35,6 +26,14 @@ typedef struct
     gint num_files;
     gchar **files;
 
+    /**
+     * If true, then keep the temp files after a child process terminates,
+     * and instead delete them all when the DtDiffProcessManager is destroyed.
+     *
+     * This would be important if we're using a diff tool that uses a single
+     * process to handle multiple invocations.
+     */
+    gboolean keep_temp_files;
     gint num_temp_files;
     GFile **temp_files;
 } DtDiffProcess;
@@ -84,26 +83,13 @@ static void dt_diff_process_free(DtDiffProcess *proc)
     }
 }
 
-DtDiffProcessManager *dt_diff_process_manager_new(DtDiffTreeModel *model,
-        const char *diff_command, gboolean keep_process_files)
+DtDiffProcessManager *dt_diff_process_manager_new(DtDiffTreeModel *model)
 {
     DtDiffProcessManager *manager = g_malloc0(sizeof(DtDiffProcessManager));
-    GError *error = NULL;
-
-    if (diff_command != NULL && diff_command[0] != '\x00')
-    {
-        if (!g_shell_parse_argv(diff_command, &manager->diff_command_argc, &manager->diff_command_argv, &error))
-        {
-            g_critical("Can't parse diff command: %s\n", error->message);
-            manager->diff_command_argc = 0;
-            manager->diff_command_argv = NULL;
-        }
-    }
 
     manager->model = g_object_ref(model);
     manager->processes = g_tree_new_full(compare_3to2, dt_file_key_compare,
             (GDestroyNotify) dt_file_key_unref, (GDestroyNotify) dt_diff_process_free);
-    manager->keep_process_files = keep_process_files;
     return manager;
 }
 
@@ -112,7 +98,6 @@ void dt_diff_process_manager_free(DtDiffProcessManager *manager)
     if (manager != NULL)
     {
         g_tree_unref(manager->processes);
-        g_strfreev(manager->diff_command_argv);
         g_object_unref(manager->model);
         g_free(manager);
     }
@@ -325,7 +310,7 @@ static void on_child_exit(GPid pid, gint status, gpointer userdata)
     proc->child_watch_id = 0;
     g_spawn_close_pid(proc->pid);
 
-    if (!proc->owner->keep_process_files)
+    if (!proc->keep_temp_files)
     {
         DtFileKey *key = dt_file_key_ref(proc->key);
         g_tree_remove(proc->owner->processes, key);
@@ -333,42 +318,49 @@ static void on_child_exit(GPid pid, gint status, gpointer userdata)
     }
 }
 
-gboolean dt_diff_process_manager_start_diff(DtDiffProcessManager *manager, GtkTreeIter *iter, GError **error)
+gboolean dt_diff_process_manager_start_diff(DtDiffProcessManager *manager,
+        const char *diff_command, gboolean keep_temp_files,
+        GtkTreeIter *iter, GError **error)
 {
     DtDiffProcess *proc = NULL;
-    gchar **argv;
+    gchar **argv = NULL;
     gint argc = 0;
     gint i;
+    gboolean success = FALSE;
 
-    if (manager->diff_command_argc < 1)
+    if (!g_shell_parse_argv(diff_command, &argc, &argv, error))
     {
-        printf("No diff command set.\n");
-        return TRUE;
+        goto done;
+    }
+    if (argc < 1)
+    {
+        g_warning("No diff command set.\n");
+        success = TRUE;
+        goto done;
     }
 
     proc = lookup_process(manager, iter);
     if (proc->child_watch_id != 0)
     {
         g_debug("Child process is already running");
-        return TRUE;
+        success = TRUE;
+        goto done;
     }
     if (!init_process_files(manager, proc, iter, error))
     {
-        return FALSE;
+        goto done;
     }
     if (proc->num_files < 2)
     {
-        return TRUE;
+        success = TRUE;
+        goto done;
     }
 
-    argv = g_malloc((manager->diff_command_argc + proc->num_files + 1) * sizeof(gchar *));
-    for (i=0; i<manager->diff_command_argc; i++)
-    {
-        argv[argc++] = manager->diff_command_argv[i];
-    }
+    // Allocate enough space to append the filenames
+    argv = g_realloc(argv, (argc + proc->num_files + 1) * sizeof(gchar *));
     for (i=0; i<proc->num_files; i++)
     {
-        argv[argc++] = proc->files[i];
+        argv[argc++] = g_strdup(proc->files[i]);
     }
     argv[argc] = NULL;
 
@@ -380,12 +372,31 @@ gboolean dt_diff_process_manager_start_diff(DtDiffProcessManager *manager, GtkTr
 
     if (!g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD, NULL, NULL, &proc->pid, error))
     {
-        g_free(argv);
-        return FALSE;
+        goto done;
     }
     g_debug("Started child %" G_PID_FORMAT, proc->pid);
 
     proc->child_watch_id = g_child_watch_add(proc->pid, on_child_exit, proc);
+    if (keep_temp_files)
+    {
+        proc->keep_temp_files = TRUE;
+    }
+    success = TRUE;
+
+done:
+    g_strfreev(argv);
+    if (!success)
+    {
+        // If keep_temp_files is true, then we succesfully started a diff
+        // process at least once, so we should leave the temp files in place.
+        // Otherwise, remove them.
+        if (proc != NULL && !proc->keep_temp_files)
+        {
+            DtFileKey *key = dt_file_key_ref(proc->key);
+            g_tree_remove(proc->owner->processes, key);
+            dt_file_key_unref(key);
+        }
+    }
     return TRUE;
 }
 

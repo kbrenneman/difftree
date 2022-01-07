@@ -21,11 +21,8 @@ typedef struct _DtDiffProcessManager DtDiffProcessManager;
  * Creates a DtDiffProcessManager.
  *
  * \param model The model to get files from.
- * \param diff_command The command line for an external diff tool. Filenames
- * are appended to this.
  */
-DtDiffProcessManager *dt_diff_process_manager_new(DtDiffTreeModel *model,
-        const char *diff_command, gboolean keep_process_files);
+DtDiffProcessManager *dt_diff_process_manager_new(DtDiffTreeModel *model);
 
 /**
  * Destroys a DtDiffProcessManager object.
@@ -42,11 +39,17 @@ void dt_diff_process_manager_free(DtDiffProcessManager *manager);
  * a new one.
  *
  * \param manager The DtDiffProcessManager.
+ * \param diff_command The command line for the external diff program. The
+ *      filenames will be appended to this.
+ * \param keep_temp_files If true, then keep the temporary files around after
+ *      the child process terminates.
  * \param iter The row to display.
  * \param error Returns an error code.
  * \return TRUE on success, FALSE on failure.
  */
-gboolean dt_diff_process_manager_start_diff(DtDiffProcessManager *manager, GtkTreeIter *iter, GError **error);
+gboolean dt_diff_process_manager_start_diff(DtDiffProcessManager *manager,
+        const char *diff_command, gboolean keep_temp_files,
+        GtkTreeIter *iter, GError **error);
 
 G_END_DECLS
 
