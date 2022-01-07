@@ -121,15 +121,32 @@ static void update_from_keyfile(DiffTreeConfig *config, GKeyFile *keyfile)
 static gboolean store_to_keyfile(DiffTreeConfig *config, GKeyFile *keyfile)
 {
     gboolean changed = FALSE;
+    gchar *str;
 
     changed = changed || (g_key_file_get_integer(keyfile, "main", "window_width", NULL) != config->window_width);
     changed = changed || (g_key_file_get_integer(keyfile, "main", "window_height", NULL) != config->window_height);
+    changed = changed || (g_key_file_get_boolean(keyfile, "main", "keep_temp_files", NULL) != config->keep_temp_files);
+
+    str = g_key_file_get_string(keyfile, "main", "diff_command_line", NULL);
+    if (g_strcmp0(str, config->diff_command_line) != 0)
+    {
+        changed = TRUE;
+        if (config->diff_command_line != NULL)
+        {
+            g_key_file_set_string(keyfile, "main", "diff_command_line", config->diff_command_line);
+        }
+        else
+        {
+            g_key_file_set_string(keyfile, "main", "diff_command_line", "");
+        }
+    }
+    g_free(str);
+
     if (changed)
     {
         g_key_file_set_integer(keyfile, "main", "window_width", config->window_width);
         g_key_file_set_integer(keyfile, "main", "window_height", config->window_height);
-        // Note: Don't try to set diff_command_line, because there's currently
-        // no way to change that in the program.
+        g_key_file_set_boolean(keyfile, "main", "keep_temp_files", config->keep_temp_files);
     }
     else
     {
