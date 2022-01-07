@@ -9,6 +9,7 @@
 #include "source-helpers.h"
 #include "app-config.h"
 #include "child-process-util.h"
+#include "settings-window.h"
 
 typedef struct
 {
@@ -247,6 +248,12 @@ static void on_menu_item_check_files(GtkMenuItem *item, gpointer userdata)
     g_list_free_full(paths, (GDestroyNotify) gtk_tree_path_free);
 }
 
+static void on_menu_item_settings(GtkMenuItem *item, gpointer userdata)
+{
+    WindowData *win = userdata;
+    dt_settings_editor_show_dialog(win->window, win->config);
+}
+
 static void on_menu_item_quit(GtkMenuItem *item, gpointer userdata)
 {
     WindowData *win = userdata;
@@ -355,6 +362,7 @@ static GtkMenuBar *create_menu(WindowData *win, GtkAccelGroup *accel_group)
     gtk_menu_shell_append(GTK_MENU_SHELL(top), item);
     add_menu_item(win, menu, "_Check Files", accel_group,
             GDK_KEY_d, GDK_CONTROL_MASK, on_menu_item_check_files);
+    add_menu_item(win, menu, "_Settings", NULL, 0, 0, on_menu_item_settings);
     add_menu_item(win, menu, "_Quit", accel_group,
             GDK_KEY_q, GDK_CONTROL_MASK, on_menu_item_quit);
 
