@@ -9,6 +9,3 @@ zip files.
 It doesn't show the differences between files by itself (other than whether
 files are different at all). Instead, it can run an external diff tool to
 display the differences in a file.
-
-Currently, there's no way to set the external diff tool in the GUI, so you have
-to edit the config file instead.
