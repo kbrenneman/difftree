@@ -220,7 +220,7 @@ static void open_file_ready(GObject *sourceobj, GAsyncResult *res, gpointer user
     g_main_loop_quit(param->mainloop);
 }
 
-GInputStream *dt_tree_source_open_file_async_wrapper(DtTreeSource *self,
+static GInputStream *dt_tree_source_open_file_async_wrapper(DtTreeSource *self,
         DtTreeSourceNode *node, GCancellable *cancellable, GError **error)
 {
     // Create a new main loop and context, and then call and wait for the
@@ -237,6 +237,7 @@ GInputStream *dt_tree_source_open_file_async_wrapper(DtTreeSource *self,
             open_file_ready, &param);
 
     g_main_loop_run(param.mainloop);
+    g_main_context_pop_thread_default(param.maincontext);
     g_main_loop_unref(param.mainloop);
     g_main_context_unref(param.maincontext);
     return param.stream;
