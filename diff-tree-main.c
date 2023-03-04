@@ -512,6 +512,11 @@ void cleanup_main_window(WindowData *win)
 {
     if (win != NULL)
     {
+        if (win->diff_model != NULL)
+        {
+            dt_diff_tree_model_cleanup_temp_files(win->diff_model);
+        }
+
         g_queue_free_full(win->diff_check_queue, (GDestroyNotify) dt_file_key_unref);
         g_clear_object(&win->diff_model);
         g_clear_object(&win->missing_filter);

@@ -6,6 +6,8 @@
 
 #include <gio/gio.h>
 
+#include "ref-count-struct.h"
+
 static const gint64 DEFAULT_MAX_READ_SIZE = (16 * 1024 * 1024);
 #define READ_BLOCK_SIZE 4096
 
@@ -16,9 +18,27 @@ struct _DtDiffTreeModel
     gint num_sources;
     DtTreeSource **sources;
     gint64 max_read_size;
+
+    /**
+     * A list of temp files that we've created, which we need to clean up.
+     */
+    GList *temp_files;
 };
 
+typedef struct
+{
+    UtilRefCountedBase base;
+    DtDiffTreeModel *owner;
+    GFile **files;
+} DtInternalTreeData; 
+
 G_DEFINE_TYPE(DtDiffTreeModel, dt_diff_tree_model, GTK_TYPE_TREE_STORE);
+
+static void dt_internal_tree_data_free(DtInternalTreeData *data);
+
+#define DT_TYPE_INTERNAL_TREE_DATA dt_internal_tree_data_get_type()
+UTIL_DECLARE_BOXED_REFCOUNT_FUNCS(DtInternalTreeData, dt_internal_tree_data);
+UTIL_DEFINE_BOXED_REFCOUNT_TYPE(DtInternalTreeData, dt_internal_tree_data, dt_internal_tree_data_free);
 
 enum
 {
@@ -26,16 +46,56 @@ enum
     N_PROPERTIES
 };
 
+static DtInternalTreeData *dt_internal_tree_data_lookup(DtDiffTreeModel *self, GtkTreeIter *iter, gboolean add)
+{
+    DtInternalTreeData *data = NULL;
+    gtk_tree_model_get(GTK_TREE_MODEL(self), iter,
+            DT_DIFF_TREE_MODEL_COL_INTERNAL, &data, -1);
+    if (data == NULL && add)
+    {
+        data = g_malloc0(sizeof(DtInternalTreeData) + self->num_sources * sizeof(GFile *));
+        util_ref_counted_struct_init(&data->base);
+        data->owner = self;
+        data->files = (GFile **) (data + 1);
+
+        gtk_tree_store_set(GTK_TREE_STORE(self), iter,
+                DT_DIFF_TREE_MODEL_COL_INTERNAL, data, -1);
+        g_assert(data->base.refcount == 2);
+    }
+    dt_internal_tree_data_unref(data);
+
+    return data;
+}
+
+static void dt_internal_tree_data_free(DtInternalTreeData *data)
+{
+    if (data != NULL)
+    {
+        gint i;
+        for (i=0; i<data->owner->num_sources; i++)
+        {
+            if (data->files[i] != NULL)
+            {
+                g_object_unref(data->files[i]);
+            }
+        }
+        g_free(data);
+    }
+}
+
 static GParamSpec *obj_properties[N_PROPERTIES] = {};
 
 static void dt_diff_tree_model_dispose(GObject *gobj)
 {
-    //DtDiffTreeModel *self = DT_DIFF_TREE_MODEL(gobj);
+    DtDiffTreeModel *self = DT_DIFF_TREE_MODEL(gobj);
+
     // TODO: We should clear the references to the DtTreeSource objects here,
     // not in dt_diff_tree_model_finalize.
 
     // Chain up to GObject.
     G_OBJECT_CLASS(dt_diff_tree_model_parent_class)->dispose(gobj);
+
+    dt_diff_tree_model_cleanup_temp_files(self);
 }
 
 static void dt_diff_tree_model_finalize(GObject *gobj)
@@ -493,6 +553,7 @@ DtDiffTreeModel *dt_diff_tree_model_new(gint num_sources, DtTreeSource **sources
     column_types[DT_DIFF_TREE_MODEL_COL_FILE_TYPE] = G_TYPE_INT;
     column_types[DT_DIFF_TREE_MODEL_COL_DIFFERENT] = G_TYPE_INT;
     column_types[DT_DIFF_TREE_MODEL_COL_NODE_ARRAY] = G_TYPE_PTR_ARRAY;
+    column_types[DT_DIFF_TREE_MODEL_COL_INTERNAL] = DT_TYPE_INTERNAL_TREE_DATA;
     for (i=0; i<num_extra_columns; i++)
     {
         column_types[DT_DIFF_TREE_MODEL_NUM_COLUMNS + i] = extra_columns[i];
@@ -888,4 +949,154 @@ gboolean dt_diff_tree_model_check_difference_finish(DtDiffTreeModel *self, GAsyn
 
     g_object_unref(task);
     return ret;
+}
+
+static GFile *create_temp_file(const char *filename, GInputStream *stream, GError **error)
+{
+    gchar *name_template = g_strdup_printf("difftree-XXXXXX-%s", filename);
+    GFileIOStream *iostream = NULL;
+    GOutputStream *outstream = NULL;
+    GFile *gf = NULL;
+    gboolean success = TRUE;
+
+    gf = g_file_new_tmp(name_template, &iostream, error);
+    g_free(name_template);
+    if (gf == NULL)
+    {
+        return NULL;
+    }
+
+    g_debug("Writing temp file: %s -> %s", filename, g_file_peek_path(gf));
+
+    outstream = g_io_stream_get_output_stream(G_IO_STREAM(iostream));
+    while (TRUE)
+    {
+        char buf[1024];
+        gssize num;
+
+        num = g_input_stream_read(stream, buf, sizeof(buf), NULL, error);
+        if (num == 0)
+        {
+            break;
+        }
+        else if (num < 0)
+        {
+            g_prefix_error(error, "Failed to read from source: ");
+            success = FALSE;
+            break;
+        }
+
+        if (!g_output_stream_write_all(outstream, buf, num, NULL, NULL, error))
+        {
+            g_prefix_error(error, "Failed to write to temp file: ");
+            success = FALSE;
+            break;
+        }
+    }
+
+    if (!g_io_stream_close(G_IO_STREAM(iostream), NULL, error))
+    {
+        g_prefix_error(error, "Failed to close temp file: ");
+        success = FALSE;
+    }
+    g_object_unref(iostream);
+
+    if (!success)
+    {
+        GError *delerr = NULL;
+        g_debug("Failed to write temp file -- deleting: %s", g_file_peek_path(gf));
+        if (!g_file_delete(gf, NULL, &delerr))
+        {
+            g_critical("Failed to delete temp file: %s\n", delerr->message);
+            g_clear_error(&delerr);
+        }
+        g_object_unref(gf);
+        gf = NULL;
+    }
+    return gf;
+}
+
+GFile *dt_diff_tree_model_get_fs_file(DtDiffTreeModel *self, GtkTreeIter *iter, gint index, GError **error)
+{
+    DtInternalTreeData *data = dt_internal_tree_data_lookup(self, iter, TRUE);
+    GFile *fspath = data->files[index];
+
+    if (fspath == NULL)
+    {
+        DtTreeSource *source = dt_diff_tree_model_get_source(self, index);
+        DtTreeSourceNode *node = dt_diff_tree_model_get_source_node(self, index, iter);
+
+        if (node != NULL)
+        {
+            GFileInfo *info = NULL;
+            info = dt_tree_source_get_file_info(source, node);
+            if (g_file_info_get_file_type(info) != G_FILE_TYPE_SYMBOLIC_LINK)
+            {
+                fspath = G_FILE(g_file_info_get_attribute_object(info, DT_FILE_ATTRIBUTE_FS_PATH));
+                if (fspath != NULL)
+                {
+                    g_object_ref(fspath);
+                }
+            }
+
+            if (fspath == NULL)
+            {
+                GInputStream *stream;
+
+                if (g_file_info_get_file_type(info) == G_FILE_TYPE_REGULAR)
+                {
+                    stream = dt_tree_source_open_file(source, node, NULL, error);
+                }
+                else
+                {
+                    stream = g_memory_input_stream_new();
+                    if (g_file_info_get_file_type(info) == G_FILE_TYPE_SYMBOLIC_LINK)
+                    {
+                        const gchar *target = g_file_info_get_symlink_target(info);
+                        if (target != NULL)
+                        {
+                            g_memory_input_stream_add_data(G_MEMORY_INPUT_STREAM(stream),
+                                    g_strdup(target), -1, g_free);
+                        }
+                    }
+                }
+
+                if (stream != NULL)
+                {
+                    fspath = create_temp_file(g_file_info_get_name(info), stream, error);
+                    g_object_unref(stream);
+
+                    if (fspath != NULL)
+                    {
+                        self->temp_files = g_list_prepend(self->temp_files, g_object_ref(fspath));
+                    }
+                }
+            }
+
+            data->files[index] = fspath;
+        }
+    }
+
+    return fspath;
+}
+
+void dt_diff_tree_model_cleanup_temp_files(DtDiffTreeModel *self)
+{
+    while (self->temp_files != NULL)
+    {
+        GFile *gf = G_FILE(self->temp_files->data);
+        GError *error = NULL;
+        self->temp_files = g_list_delete_link(self->temp_files, self->temp_files);
+
+        g_debug("Deleting temp file: %s", g_file_peek_path(gf));
+        if (!g_file_delete(gf, NULL, &error))
+        {
+            if (error->domain != G_IO_ERROR || error->code != G_IO_ERROR_NOT_FOUND)
+            {
+                g_warning("Can't delete file %s: %s", g_file_peek_path(gf), error->message);
+            }
+            g_clear_error(&error);
+        }
+        g_object_unref(gf);
+    }
 }

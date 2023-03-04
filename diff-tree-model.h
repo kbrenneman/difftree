@@ -24,6 +24,10 @@ enum
      * An GPtrArray with the DtTreeSourceNode pointers for each source
      */
     DT_DIFF_TREE_MODEL_COL_NODE_ARRAY,
+
+    /// Stores data that's internal to the DtDiffTreeModel.
+    DT_DIFF_TREE_MODEL_COL_INTERNAL,
+
     DT_DIFF_TREE_MODEL_NUM_COLUMNS
 };
 
@@ -46,6 +50,17 @@ void dt_diff_tree_model_check_difference_async(DtDiffTreeModel *self,
         GtkTreeIter *iter, gint io_priority, GCancellable *cancellable,
         GAsyncReadyCallback callback, gpointer userdata);
 gboolean dt_diff_tree_model_check_difference_finish(DtDiffTreeModel *self, GAsyncResult *res, GError **error);
+
+/**
+ * Returns a GFile for a file from a DtTreeSource.
+ *
+ * If necessary, this will extract the file to a temp file first.
+ *
+ * TODO: Make this asynchronous?
+ */
+GFile *dt_diff_tree_model_get_fs_file(DtDiffTreeModel *self, GtkTreeIter *iter, gint index, GError **error);
+
+void dt_diff_tree_model_cleanup_temp_files(DtDiffTreeModel *self);
 
 G_END_DECLS
 
