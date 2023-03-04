@@ -30,7 +30,8 @@ enum
 #define DT_TYPE_DIFF_TREE_MODEL dt_diff_tree_model_get_type()
 G_DECLARE_FINAL_TYPE(DtDiffTreeModel, dt_diff_tree_model, DT, DIFF_TREE_MODEL, GtkTreeStore);
 
-DtDiffTreeModel *dt_diff_tree_model_new(gint num_sources, DtTreeSource **sources);
+DtDiffTreeModel *dt_diff_tree_model_new(gint num_sources, DtTreeSource **sources,
+        int num_extra_columns, GType *extra_columns);
 
 gint dt_diff_tree_model_get_num_sources(DtDiffTreeModel *self);
 DtTreeSource *dt_diff_tree_model_get_source(DtDiffTreeModel *self, gint source_index);

@@ -479,7 +479,7 @@ WindowData *create_main_window(DiffTreeConfig *config, GPtrArray *sources)
     gint i;
 
     win->config = diff_tree_config_ref(config);
-    win->diff_model = dt_diff_tree_model_new(sources->len, (DtTreeSource **) sources->pdata);
+    win->diff_model = dt_diff_tree_model_new(sources->len, (DtTreeSource **) sources->pdata, 0, NULL);
     gtk_tree_sortable_set_default_sort_func(GTK_TREE_SORTABLE(win->diff_model),
             diff_tree_model_row_compare, NULL, NULL);
     gtk_tree_sortable_set_sort_column_id(GTK_TREE_SORTABLE(win->diff_model),

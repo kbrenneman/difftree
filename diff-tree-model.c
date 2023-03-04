@@ -480,21 +480,26 @@ static void on_source_nodes_changed(DtTreeSource *source, DtTreeSourceNode *pare
     }
 }
 
-DtDiffTreeModel *dt_diff_tree_model_new(gint num_sources, DtTreeSource **sources)
+DtDiffTreeModel *dt_diff_tree_model_new(gint num_sources, DtTreeSource **sources,
+        int num_extra_columns, GType *extra_columns)
 {
-    GType column_types[DT_DIFF_TREE_MODEL_NUM_COLUMNS] =
-    {
-        G_TYPE_STRING,
-        G_TYPE_INT,
-        G_TYPE_INT,
-        G_TYPE_PTR_ARRAY
-    };
+    GType *column_types = g_malloc0((DT_DIFF_TREE_MODEL_NUM_COLUMNS + num_extra_columns) * sizeof(GType));
     DtDiffTreeModel *self = g_object_new(DT_TYPE_DIFF_TREE_MODEL, NULL);
     GtkTreeIter root;
     GPtrArray *nodeArray;
     gint i;
 
-    gtk_tree_store_set_column_types(GTK_TREE_STORE(self), DT_DIFF_TREE_MODEL_NUM_COLUMNS, column_types);
+    column_types[DT_DIFF_TREE_MODEL_COL_NAME] = G_TYPE_STRING;
+    column_types[DT_DIFF_TREE_MODEL_COL_FILE_TYPE] = G_TYPE_INT;
+    column_types[DT_DIFF_TREE_MODEL_COL_DIFFERENT] = G_TYPE_INT;
+    column_types[DT_DIFF_TREE_MODEL_COL_NODE_ARRAY] = G_TYPE_PTR_ARRAY;
+    for (i=0; i<num_extra_columns; i++)
+    {
+        column_types[DT_DIFF_TREE_MODEL_NUM_COLUMNS + i] = extra_columns[i];
+    }
+
+    gtk_tree_store_set_column_types(GTK_TREE_STORE(self), DT_DIFF_TREE_MODEL_NUM_COLUMNS + num_extra_columns, column_types);
+    g_free(column_types);
 
     self->num_sources = num_sources;
     self->sources = g_malloc(num_sources * sizeof(DtTreeSource *));
