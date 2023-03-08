@@ -595,6 +595,7 @@ int main(int argc, char **argv)
         config->diff_command_line = option_diff_command;
     }
     win = create_main_window(config, sources);
+    g_ptr_array_unref(sources);
 
     gtk_main();
 

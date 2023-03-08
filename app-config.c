@@ -28,6 +28,7 @@ void config_data_free(DiffTreeConfig *config)
 {
     if (config != NULL)
     {
+        g_free(config->diff_command_line);
         g_free(config);
     }
 }
@@ -223,4 +224,6 @@ void config_data_write_file(DiffTreeConfig *config, const char *filename)
             g_clear_error(&error);
         }
     }
+
+    g_key_file_unref(keyfile);
 }

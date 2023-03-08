@@ -352,6 +352,7 @@ static void cleanup_scan_task_data(gpointer ptr)
     {
         DtTreeSourceFSScanState *state = ptr;
         g_queue_clear(&state->queue);
+        g_free(state);
     }
 }
 

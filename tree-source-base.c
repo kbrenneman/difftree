@@ -69,7 +69,9 @@ static void dt_tree_source_base_dispose(GObject *gobj)
 static void dt_tree_source_base_finalize(GObject *gobj)
 {
     // Free anything that we didn't free in dispose().
-    //DtTreeSourceBase *self = DT_TREE_SOURCE_BASE(gobj);
+    DtTreeSourceBase *self = DT_TREE_SOURCE_BASE(gobj);
+    DtTreeSourceBasePrivate *priv = GET_PRIVATE(self);
+    node_free(priv->root);
     G_OBJECT_CLASS(dt_tree_source_base_parent_class)->finalize(gobj);
 }
 

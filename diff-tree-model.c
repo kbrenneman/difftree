@@ -155,6 +155,7 @@ static void add_child_node(DtDiffTreeModel *self, GtkTreeIter *iter,
             DT_DIFF_TREE_MODEL_COL_FILE_TYPE, g_file_info_get_file_type(info),
             DT_DIFF_TREE_MODEL_COL_NODE_ARRAY, nodeArray, -1);
     *iter = child;
+    g_ptr_array_unref(nodeArray);
 }
 
 /**
