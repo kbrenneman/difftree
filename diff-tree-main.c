@@ -91,6 +91,32 @@ static GPtrArray *create_sources(const char * const *paths, int num_sources,
     return sources;
 }
 
+static gboolean show_single_file(DtDiffTreeModel *model, GtkTreeIter *iter,
+        gint source_index, GError **error)
+{
+    GFile *gf = dt_diff_tree_model_get_fs_file(model, iter, source_index, error);
+    gboolean ret = FALSE;
+
+    if (gf != NULL)
+    {
+        char *uri = g_file_get_uri(gf);
+        if (uri != NULL)
+        {
+            g_debug("Starting viewer for %s", uri);
+            ret = g_app_info_launch_default_for_uri(uri, NULL, error);
+            g_debug("g_app_info_launch_default_for_uri returned %d", (int) ret);
+            g_free(uri);
+        }
+        else
+        {
+            g_warning("Can't get URI for file %s", g_file_peek_path(gf));
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Can't get URI for file?");
+        }
+    }
+
+    return ret;
+}
+
 static gboolean show_file(const char *diff_command, DtDiffTreeModel *model, GtkTreeIter *iter, GError **error)
 {
     gint *sources = g_malloc(dt_diff_tree_model_get_num_sources(model) * sizeof(gint));
@@ -156,23 +182,7 @@ static gboolean show_file(const char *diff_command, DtDiffTreeModel *model, GtkT
     }
     else if (numFiles == 1)
     {
-        GFile *gf = dt_diff_tree_model_get_fs_file(model, iter, sources[0], error);
-        if (gf != NULL)
-        {
-            char *uri = g_file_get_uri(gf);
-            if (uri != NULL)
-            {
-                g_debug("Starting viewer for %s", uri);
-                ret = g_app_info_launch_default_for_uri(uri, NULL, error);
-                g_debug("g_app_info_launch_default_for_uri returned %d", (int) ret);
-                g_free(uri);
-            }
-            else
-            {
-                g_warning("Can't get URI for file %s", g_file_peek_path(gf));
-                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Can't get URI for file?");
-            }
-        }
+        ret = show_single_file(model, iter, sources[0], error);
     }
 
 done:
@@ -416,6 +426,45 @@ static void on_menu_item_toggle_missing(GtkMenuItem *item, gpointer userdata)
     }
 }
 
+typedef struct
+{
+    WindowData *win;
+    gint index;
+} ShowSingleFileMenuParam;
+
+static void on_menu_item_show_single_file(GtkMenuItem *item, gpointer userdata)
+{
+    ShowSingleFileMenuParam *param = userdata;
+    GtkTreeSelection *sel = gtk_tree_view_get_selection(param->win->view);
+    GList *paths = gtk_tree_selection_get_selected_rows(sel, NULL);
+    GError *error = NULL;
+
+    if (paths != NULL)
+    {
+        GtkTreePath *path = paths->data;
+        GtkTreeIter viewIter, iter;
+
+        if (gtk_tree_model_get_iter(GTK_TREE_MODEL(param->win->missing_filter), &viewIter, path))
+        {
+            gtk_tree_model_filter_convert_iter_to_child_iter(param->win->missing_filter, &iter, &viewIter);
+
+            if (!show_single_file(param->win->diff_model, &iter, param->index, &error))
+            {
+                if (error != NULL)
+                {
+                    show_error_message(param->win->window, "%s", get_gerror_message(error));
+                    g_clear_error(&error);
+                }
+            }
+        }
+        g_list_free_full(paths, (GDestroyNotify) gtk_tree_path_free);
+    }
+}
+static void free_single_file_menu_param(gpointer ptr, GClosure *closure)
+{
+    g_free(ptr);
+}
+
 static GtkWidget *add_menu_item(WindowData *win, GtkMenuShell *parent, const char *name,
         GtkAccelGroup *accel_group, gint accel_key, GdkModifierType accel_mods,
         void (* activate_callback) (GtkMenuItem *item, gpointer userdata))
@@ -450,6 +499,31 @@ static GtkMenuBar *create_menu(WindowData *win, GtkAccelGroup *accel_group)
     add_menu_item(win, menu, "_Check Files", accel_group,
             GDK_KEY_d, GDK_CONTROL_MASK, on_menu_item_check_files);
     add_menu_item(win, menu, "_Settings", NULL, 0, 0, on_menu_item_settings);
+
+    for (i=0; i<dt_diff_tree_model_get_num_sources(win->diff_model); i++)
+    {
+        gchar label[64];
+        ShowSingleFileMenuParam *param = g_malloc(sizeof(ShowSingleFileMenuParam));
+        param->win = win;
+        param->index = i;
+
+        if (i <= 9)
+        {
+            snprintf(label, sizeof(label), "View file from _%d", i);
+            item = gtk_menu_item_new_with_mnemonic(label);
+            gtk_widget_add_accelerator(item, "activate", accel_group, GDK_KEY_0 + i, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+        }
+        else
+        {
+            snprintf(label, sizeof(label), "View file from %d", i);
+            item = gtk_menu_item_new_with_label(label);
+        }
+
+        g_signal_connect_data(item, "activate", G_CALLBACK(on_menu_item_show_single_file),
+                param, free_single_file_menu_param, 0);
+        gtk_menu_shell_append(menu, item);
+    }
+
     add_menu_item(win, menu, "_Quit", accel_group,
             GDK_KEY_q, GDK_CONTROL_MASK, on_menu_item_quit);
 
