@@ -8,7 +8,6 @@
 #include "diff-tree-view.h"
 #include "source-helpers.h"
 #include "app-config.h"
-#include "child-process-util.h"
 #include "settings-window.h"
 
 typedef struct
@@ -26,7 +25,6 @@ typedef struct
      * files.
      */
     gboolean needs_missing_filter_update;
-    DtDiffProcessManager *child_manager;
 
     GQueue *diff_check_queue;
     gboolean diff_check_running;
@@ -93,6 +91,75 @@ static GPtrArray *create_sources(const char * const *paths, int num_sources,
     return sources;
 }
 
+static gboolean show_file(const char *diff_command, DtDiffTreeModel *model, GtkTreeIter *iter, GError **error)
+{
+    gint *sources = g_malloc(dt_diff_tree_model_get_num_sources(model) * sizeof(gint));
+    gint numFiles = 0;
+    gboolean ret = FALSE;
+    gint i;
+
+    for (i=0; i<dt_diff_tree_model_get_num_sources(model); i++)
+    {
+        DtTreeSourceNode *node = dt_diff_tree_model_get_source_node(model, i, iter);
+        if (node != NULL)
+        {
+            sources[numFiles++] = i;
+        }
+    }
+
+    if (numFiles >= 2)
+    {
+        GFile **files = g_malloc0(numFiles * sizeof(GFile *));
+        int argc = 0;
+        char **argv = NULL;
+        GPid child;
+
+        if (!g_shell_parse_argv(diff_command, &argc, &argv, error))
+        {
+            goto done;
+        }
+        if (argc < 1)
+        {
+            g_warning("No diff command set.\n");
+            g_free(argv);
+            ret = TRUE;
+            goto done;
+        }
+
+        for (i=0; i<numFiles; i++)
+        {
+            gint index = sources[i];
+            files[i] = dt_diff_tree_model_get_fs_file(model, iter, index, error);
+            if (files[i] == NULL)
+            {
+                g_strfreev(argv);
+                g_free(files);
+                goto done;
+            }
+        }
+
+        // Allocate enough space to append the filenames
+        argv = g_realloc(argv, (argc + numFiles + 1) * sizeof(gchar *));
+        for (i=0; i<numFiles; i++)
+        {
+            argv[argc++] = g_file_get_path(files[i]);
+        }
+        argv[argc] = NULL;
+
+        if (g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, &child, error))
+        {
+            g_debug("Started child %" G_PID_FORMAT, child);
+            ret = TRUE;
+        }
+        g_free(files);
+        g_strfreev(argv);
+    }
+
+done:
+    g_free(sources);
+    return ret;
+}
+
 static void on_row_activated(GtkTreeView *view, GtkTreePath *path, GtkTreeViewColumn *col, gpointer userdata)
 {
     WindowData *win = userdata;
@@ -128,13 +195,13 @@ static void on_row_activated(GtkTreeView *view, GtkTreePath *path, GtkTreeViewCo
     }
     else if (type == G_FILE_TYPE_REGULAR || type == G_FILE_TYPE_SYMBOLIC_LINK)
     {
-        // TODO: Skip this if we know the files to be identical?
-        if (!dt_diff_process_manager_start_diff(win->child_manager,
-                    win->config->diff_command_line, win->config->keep_temp_files,
-                    &iter, &error))
+        if (!show_file(win->config->diff_command_line, win->diff_model, &iter, &error))
         {
-            show_error_message(win->window, "Failed to start diff tool: %s\n", get_gerror_message(error));
-            g_clear_error(&error);
+            if (error != NULL)
+            {
+                show_error_message(win->window, "Failed to start diff tool: %s\n", get_gerror_message(error));
+                g_clear_error(&error);
+            }
         }
     }
 }
@@ -490,7 +557,6 @@ WindowData *create_main_window(DiffTreeConfig *config, GPtrArray *sources)
     g_array_set_size(win->hide_missing_flags, dt_diff_tree_model_get_num_sources(win->diff_model));
 
     init_gui(win);
-    win->child_manager = dt_diff_process_manager_new(win->diff_model);
 
     // Start reading the sources
     for (i=0; i<dt_diff_tree_model_get_num_sources(win->diff_model); i++)
@@ -522,7 +588,6 @@ void cleanup_main_window(WindowData *win)
         g_clear_object(&win->missing_filter);
         g_free(win->hide_missing_menus);
         g_array_unref(win->hide_missing_flags);
-        dt_diff_process_manager_free(win->child_manager);
         diff_tree_config_unref(win->config);
 
         g_free(win);

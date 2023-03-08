@@ -10,7 +10,6 @@ dep_zip = dependency('libzip', required: true)
 
 executable('difftree',
   'app-config.c',
-  'child-process-util.c',
   'diff-tree-main.c',
   'diff-tree-model.c',
   'diff-tree-view.c',
