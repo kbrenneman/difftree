@@ -154,6 +154,26 @@ static gboolean show_file(const char *diff_command, DtDiffTreeModel *model, GtkT
         g_free(files);
         g_strfreev(argv);
     }
+    else if (numFiles == 1)
+    {
+        GFile *gf = dt_diff_tree_model_get_fs_file(model, iter, sources[0], error);
+        if (gf != NULL)
+        {
+            char *uri = g_file_get_uri(gf);
+            if (uri != NULL)
+            {
+                g_debug("Starting viewer for %s", uri);
+                ret = g_app_info_launch_default_for_uri(uri, NULL, error);
+                g_debug("g_app_info_launch_default_for_uri returned %d", (int) ret);
+                g_free(uri);
+            }
+            else
+            {
+                g_warning("Can't get URI for file %s", g_file_peek_path(gf));
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Can't get URI for file?");
+            }
+        }
+    }
 
 done:
     g_free(sources);
